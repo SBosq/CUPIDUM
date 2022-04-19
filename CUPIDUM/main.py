@@ -1,9 +1,17 @@
 import gspread
-import numpy as np
-from sklearn.cluster import KMeans
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.decomposition import PCA
+from sklearn.cluster import MiniBatchKMeans
 from sklearn import preprocessing
 import pandas as pd
+#######################################
 from matplotlib import pyplot as plt
+import seaborn as sns
+from collections import Counter
+#######################################
+import joblib
+import json
 
 pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
@@ -11,83 +19,90 @@ pd.set_option('display.width', None)
 
 gc = gspread.service_account(filename='mycredentials.json')
 gsheet = gc.open_by_key("1ieph14IFEyGr2LsDJ8JmGPxreWR8MBgcCn8-7REW_HQ")
-mydata = gsheet.sheet1.get_all_records()
-df = pd.DataFrame(mydata)
+# values_list = gsheet.sheet1.row_values(83)
+# print(values_list)
+df = pd.DataFrame(gsheet.sheet1.get_all_records())
 del df['Timestamp']
-
+########################################################################################################################
 #  Changing string elements to numbers so the classifier can work
+for (columnName, columnData) in df.iteritems():
+    df[columnName] = df[columnName].astype('category')
+    df[columnName] = df[columnName].cat.codes
+scaler = MinMaxScaler()
+normDf = pd.DataFrame(scaler.fit_transform(df), columns=df.columns, index=df.index)
+# Dropping column with email address since this column isn't needed
+del normDf['Email Address']
+# Renaming columns from phrases to string
+normDf = normDf.rename(columns={'¿Qué tan religios@ eres?': 'Religion',
+                                '¿Crees que las relaciones a distancia pueden funcionar?': 'Distance',
+                                '¿Hablas de tus problemas personales con tus amigos cercanos?': 'Personal',
+                                '¿Eres propenso a tomar decisiones impulsivas?': 'Impulsive',
+                                '¿Quieres casarte?': 'Marry',
+                                '¿Crees en los horóscopos y signos del zodiaco?': 'Zodiac',
+                                '¿Qué tan consciente eres de tu salud?': 'Health',
+                                '¿Te gusta hablar sobre tus problemas?': 'Problems',
+                                '¿Tu ego te impide disculparte cuando te equivocas?': 'Ego',
+                                '¿Cómo resuelves los problemas con tus amigos/familiares? [Respuesta:]': 'Family',
+                                '¿Con qué tipo de personalidad te identificas? [Respuesta:]': 'Personality',
+                                '¿Haces ejercicio?': 'Gym',
+                                'Si no estoy de acuerdo contigo en algunos temas, ¿cómo te sientes? [Respuesta:]': 'Agree',
+                                '¿Prefieres ver películas o leer libros? [Respuesta:]': 'Movies',
+                                'Sexo': 'Sex'})
+# print(normDf)
+########################################################################################################################
+features = ['Religion', 'Distance', 'Personal', 'Impulsive', 'Marry', 'Zodiac', 'Health', 'Problems', 'Ego', 'Family',
+            'Personality', 'Gym', 'Agree', 'Movies']
+# Taking values from columns and prepping them to use Principal Component Analysis
+x = normDf.loc[:, features].values
+y = normDf.loc[:, ['Sex']].values
+X = StandardScaler().fit_transform(x)
+pca = PCA(n_components=2)
+principalComponents = pca.fit_transform(x)
+# Creating DataFrame from the newly generated data from PCA
+principalDF = pd.DataFrame(data=principalComponents, columns=['principal component 1', 'principal component 2'])
+# Adding Sex column from original DataFrame to the new PCA DataFrame
+finalDf = pd.concat([principalDF, normDf[['Sex']]], axis=1)
+# Changing Sex from string to number using label encoder
 label_encoder = preprocessing.LabelEncoder()
-df['¿Cómo resuelves los problemas con tus amigos/familiares? [Respuesta:]'] = label_encoder.fit_transform(
-    df['¿Cómo resuelves los problemas con tus amigos/familiares? [Respuesta:]'])
-df['¿Con qué tipo de personalidad te identificas? [Respuesta:]'] = label_encoder.fit_transform(
-    df['¿Con qué tipo de personalidad te identificas? [Respuesta:]'])
-df['Si no estoy de acuerdo contigo en algunos temas, ¿cómo te sientes? [Respuesta:]'] = label_encoder.fit_transform(
-    df['Si no estoy de acuerdo contigo en algunos temas, ¿cómo te sientes? [Respuesta:]'])
-df['¿Prefieres ver películas o leer libros? [Respuesta:]'] = label_encoder.fit_transform(
-    df['¿Prefieres ver películas o leer libros? [Respuesta:]'])
-df['Sexo'] = label_encoder.fit_transform(df['Sexo'])
-df['Email Address'] = label_encoder.fit_transform(df['Email Address'])
-Y_var = df['Sexo'].values
-X_var = df[['¿Qué tan religios@ eres?',
-            '¿Crees que las relaciones a distancia pueden funcionar?',
-            '¿Hablas de tus problemas personales con tus amigos cercanos?',
-            '¿Eres propenso a tomar decisiones impulsivas?', '¿Quieres casarte?',
-            '¿Crees en los horóscopos y signos del zodiaco?',
-            '¿Qué tan consciente eres de tu salud?',
-            '¿Te gusta hablar sobre tus problemas?',
-            '¿Tu ego te impide disculparte cuando te equivocas?',
-            '¿Cómo resuelves los problemas con tus amigos/familiares? [Respuesta:]',
-            '¿Con qué tipo de personalidad te identificas? [Respuesta:]',
-            '¿Haces ejercicio?',
-            'Si no estoy de acuerdo contigo en algunos temas, ¿cómo te sientes? [Respuesta:]',
-            '¿Prefieres ver películas o leer libros? [Respuesta:]',
-            'Sexo']].values
-wcss = []
-for i in range(1, 11):
-    k_means = KMeans(n_clusters=i, init='k-means++', random_state=0)
-    k_means.fit(X_var)
-    wcss.append(k_means.inertia_)
-plt.plot(np.arange(1, 11), wcss)
-plt.xlabel('Clusters')
-plt.ylabel('SSE')
-# plt.show()
+finalDf['Sex'] = label_encoder.fit_transform(finalDf['Sex'])
+x_fin = normDf.loc[:, features].values
+y_fin = normDf.loc[:, ['Sex']].values
+X_train, X_test, y_train, y_test = train_test_split(x_fin, y_fin, test_size=0.3, random_state=0)
+# print(finalDf)
+# print()
+# print('\n', finalDf.iloc[len(finalDf.index) - 1:, :])
+# print()
 
-k_means_optimum = KMeans(n_clusters=6, init='k-means++', random_state=0)
-y = k_means_optimum.fit_predict(X_var)
-# print(y)
-df['cluster'] = y
-df = df.rename(columns={'¿Qué tan religios@ eres?': 'Religion',
-                        '¿Crees que las relaciones a distancia pueden funcionar?': 'Distance',
-                        '¿Hablas de tus problemas personales con tus amigos cercanos?': 'Personal',
-                        '¿Eres propenso a tomar decisiones impulsivas?': 'Implusive',
-                        '¿Quieres casarte?': 'Marry',
-                        '¿Crees en los horóscopos y signos del zodiaco?': 'Zodiac',
-                        '¿Qué tan consciente eres de tu salud?': 'Health',
-                        '¿Te gusta hablar sobre tus problemas?': 'Problems',
-                        '¿Tu ego te impide disculparte cuando te equivocas?': 'Ego',
-                        '¿Cómo resuelves los problemas con tus amigos/familiares? [Respuesta:]': 'Family',
-                        '¿Con qué tipo de personalidad te identificas? [Respuesta:]': 'Personality',
-                        '¿Haces ejercicio?': 'Gym',
-                        'Si no estoy de acuerdo contigo en algunos temas, ¿cómo te sientes? [Respuesta:]': 'Agree',
-                        '¿Prefieres ver películas o leer libros? [Respuesta:]': 'Movies',
-                        'Sexo': 'Sex'})
-# print()
-# print("This is the whole dataset:", df, '\n')
-df1 = df[df.cluster == 0]
-df2 = df[df.cluster == 1]
-df3 = df[df.cluster == 2]
-df4 = df[df.cluster == 3]
-df5 = df[df.cluster == 4]
-df6 = df[df.cluster == 5]
-# print()
-print("This is cluster 1:\n", df1, "\nThis cluster has", len(df1), 'Elements\n')
+# Initializing the MiniKMeans model to be used
+mini = MiniBatchKMeans(n_clusters=3)
+# mini.fit(finalDf)
+minMod = mini.fit(X_train, y_train)
+joblib.dump(minMod, 'miniKMeans.pkl')
+carryMod = joblib.load('miniKMeans.pkl')
+
+
+# Predicting the cluster of each row of data passed to the model and adding column with this information
+y1 = minMod.fit_predict(principalDF)
+finalDf['Cluster'] = y1
+clustNum = finalDf['Cluster'].iloc[len(finalDf.index) - 1]
+print("This is the returned result:", clustNum)
+print(normDf.columns)
+fin_mod = finalDf.to_json()
+print(fin_mod)
+print(type(clustNum))
+
+print(finalDf)
 print()
-print("This is cluster 2:\n", df2, "\nThis cluster has", len(df2), 'Elements\n')
+print("Inertia:\n", mini.inertia_)
 print()
-print("This is cluster 3:\n", df3, "\nThis cluster has", len(df3), 'Elements\n')
+print("Number of iterations:\n", mini.n_iter_)
 print()
-print("This is cluster 4:\n", df4, "\nThis cluster has", len(df4), 'Elements\n')
+print("Cluster Centers:\n", mini.cluster_centers_)
 print()
-print("This is cluster 5:\n", df5, "\nThis cluster has", len(df5), 'Elements\n')
-print()
-print("This is cluster 6:\n", df6, "\nThis cluster has", len(df6), 'Elements\n')
+print("How many elements in each cluster:\n", Counter(mini.labels_))
+
+sns.scatterplot(data=finalDf, x='principal component 1', y='principal component 2', hue=mini.labels_)
+plt.scatter(mini.cluster_centers_[:, 0], mini.cluster_centers_[:, 1],
+            marker="X", c="r", s=80, label="centroids")
+plt.legend()
+plt.show()
