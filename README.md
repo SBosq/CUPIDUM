@@ -34,6 +34,7 @@
     <li>With the model trained and providing satisfactory results, the trained model is compressed into a "pickle" or .pkl format and is ready to be exported to the cloud server</li>
     <li>Finally each individual's answers are passed through the trained model and a cluster is predicted. Once the cluster is given, it is added to a final Dataset with the prepared data from before</li>
   </ol>
+  <hr>
   This is still a brief description of how I created the API for this mobile application using Python and Flask. However, there are still other steps that were overlooked, such as how to create a Pythonanywhere account
   in order to host the API on the cloud. As well as how to code certain aspects of the API in order for it to give the correct response, and the usage of Postman for trial and error with certain responses or duplicated
   individual form responses.
